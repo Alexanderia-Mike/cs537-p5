@@ -13,7 +13,7 @@ unsigned int blocks_per_group = 0;
 unsigned int num_groups = 0;
 
 
-int debug = 1;          //turn on/off debug prints
+int debug = 0;          //turn on/off debug prints
 
 /* read the first super block to initialize common variables */
 void ext2_read_init( int                      fd)
