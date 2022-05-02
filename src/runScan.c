@@ -52,16 +52,17 @@ int main(int argc, char **argv) {
 
     /* find the inodes representing jpgs and write to outdir using inode numbers as file names.
        Store information in dir_locator and jpg_inodes throughout the process */
-    find_and_copy_jpg_inode(dir_locator, jpg_inodes, super, disk_fd, argv[2]);
+    find_and_copy_jpg_inode(dir_locator, jpg_inodes, disk_fd, argv[2]);
 
-    // debug
     if (debug) {
+        printf("--------dir_locator list:\n");
         print(dir_locator, print_dir_locator);
+        printf("--------jpg_inodes list:\n");
         print(jpg_inodes, print_jpg_inode);
     }
 
     /* scan directories to find the actual filenames of the jpg files and write them to outdir */
-    find_and_copy_jpg_filename(dir_locator, jpg_inodes, super, disk_fd, argv[2]);
+    find_and_copy_jpg_filename(dir_locator, jpg_inodes, disk_fd, argv[2]);
 
     close(disk_fd);
     free(super);
@@ -119,8 +120,8 @@ int create_file_filename(char *file_name, char *out_dir) {
 }
 
 
-void copy_to_file(int jpg_fd, struct ext2_super_block *super, int disk_fd, struct ext2_inode *inode, int grp_idx) {
-    unsigned int block_num = inode->i_blocks / (2 << super->s_log_block_size);
+void copy_to_file(int jpg_fd, int disk_fd, struct ext2_inode *inode, int grp_idx) {
+    unsigned int block_num = (inode->i_size + 1023) / 1024;
     int b_per_b = block_size / 4;   // block per block
     char *buffer = (char *) malloc(block_size);
     /* tell the indirect block usage */
@@ -136,13 +137,16 @@ void copy_to_file(int jpg_fd, struct ext2_super_block *super, int disk_fd, struc
             doublee = 1;
             int double_block_num = block_num - (EXT2_NDIR_BLOCKS + b_per_b);
             single_offset = b_per_b;
-            double_offset_1 = double_block_num / b_per_b;
             double_offset_2 = double_block_num % b_per_b;
+            double_offset_1 = (double_block_num-double_offset_2) / b_per_b;
         } else {
             doublee = 0;
             single_offset = block_num - EXT2_NDIR_BLOCKS;
         }
     }
+    if (debug)
+        printf("block_num=%d, single=%d, doublee=%d, single_offset=%d, double_offset_1=%d, double_offset_2=%d\n",
+                block_num, single, doublee, single_offset, double_offset_1, double_offset_2);
 
     /* read the data blocks of a file one by one */
     if (single == 0) {
@@ -159,7 +163,7 @@ void copy_to_file(int jpg_fd, struct ext2_super_block *super, int disk_fd, struc
 }
 
 
-void find_and_copy_jpg_inode(node_t **dir_locator, node_t **jpg_inodes, struct ext2_super_block *super, int disk_fd, char *out_dir) {
+void find_and_copy_jpg_inode(node_t **dir_locator, node_t **jpg_inodes, int disk_fd, char *out_dir) {
     /* iterate through all the groups */
     struct ext2_group_desc *group = (struct ext2_group_desc *) malloc(sizeof(struct ext2_group_desc));
     for (unsigned int grp_idx = 0; grp_idx < num_groups; ++grp_idx) {
@@ -176,6 +180,8 @@ void find_and_copy_jpg_inode(node_t **dir_locator, node_t **jpg_inodes, struct e
             if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode)) {
                 continue;
             } else if (S_ISDIR(inode->i_mode)) {
+                if (inode->i_size > block_size)
+                    continue;
                 /* store it into dir_locator */
                 inode_loc_t ind_loc = { .ngroup=grp_idx, .offset=start_inode_table, .inode_no=ind_idx };
                 push(dir_locator, 0, &ind_loc, sizeof(inode_loc_t));
@@ -192,7 +198,7 @@ void find_and_copy_jpg_inode(node_t **dir_locator, node_t **jpg_inodes, struct e
                     /* create a new file in output-dir */
                     int jpg_fd = create_file_ino(inode_num, out_dir);
                     /* write to the new file */
-                    copy_to_file(jpg_fd, super, disk_fd, inode, grp_idx);
+                    copy_to_file(jpg_fd, disk_fd, inode, grp_idx);
                     close(jpg_fd);
                 }
             }
@@ -253,7 +259,7 @@ void copy_double_indirect(int double_offset_1, int double_offset_2, int b_per_b,
 }
 
 
-void find_and_copy_jpg_filename(node_t **dir_locator, node_t **jpg_inodes, struct ext2_super_block *super, int disk_fd, char *out_dir) {
+void find_and_copy_jpg_filename(node_t **dir_locator, node_t **jpg_inodes, int disk_fd, char *out_dir) {
     /* scan through all the directories */
     node_t *dir_iterator = *dir_locator;
     inode_loc_t *dir_loc;
@@ -268,6 +274,9 @@ void find_and_copy_jpg_filename(node_t **dir_locator, node_t **jpg_inodes, struc
         dir_loc = (inode_loc_t *) dir_iterator->data;
         read_group_desc(disk_fd, dir_loc->ngroup, group);
         my_read_inode(disk_fd, dir_loc->offset, dir_loc->inode_no, dir);
+        if (debug)
+            printf("-------- the directory %d has i_size = %d! ---------\n", 
+                    real_inode_num(dir_loc->ngroup, dir_loc->inode_no), dir->i_size);
         read_block(disk_fd, locate_group(dir_loc->ngroup), dir->i_block[0], dir_content);
         dir_entry = (struct ext2_dir_entry_2 *) dir_content;
         dir_content_curser = dir_content;
@@ -275,6 +284,10 @@ void find_and_copy_jpg_filename(node_t **dir_locator, node_t **jpg_inodes, struc
             /* for each dir entry: check whether its inode is in jpg_inodes list */
             char file_name[256] = "";
             search_for_inode(dir_entry, jpg_inodes, file_name);
+            if (debug)
+                printf("dir_content_curser - dir_content=%ld, name_len=%d\n",
+                        dir_content_curser - dir_content, dir_entry->name_len);
+
             /* if found a match: create a new file in output-dir and write to it */
             if (strlen(file_name) != 0) {
                 int jpg_fd = create_file_filename(file_name, out_dir);
@@ -282,7 +295,7 @@ void find_and_copy_jpg_filename(node_t **dir_locator, node_t **jpg_inodes, struc
                             locate_inode_table(dir_loc->ngroup, group),
                             dir_entry->inode, 
                             inode);
-                copy_to_file(jpg_fd, super, disk_fd, inode, dir_loc->ngroup);
+                copy_to_file(jpg_fd, disk_fd, inode, dir_loc->ngroup);
                 close(jpg_fd);
             }
             dir_content_curser += (8 + (dir_entry->name_len % 4 == 0 ? dir_entry->name_len : (dir_entry->name_len/4 + 1) * 4));
@@ -303,7 +316,8 @@ int search_for_inode(struct ext2_dir_entry_2 *dir_entry, node_t **jpg_inodes, ch
         unsigned inode_num = *(unsigned *) iterator->data;
         /* if found: return filename, and remove the inode_num from jpg_inodes list */
         if (inode_num == dir_entry->inode) {
-            strcpy(file_name, dir_entry->name);
+            strncpy(file_name, dir_entry->name, dir_entry->name_len);
+            file_name[dir_entry->name_len] = 0;
             erase(jpg_inodes, idx);
             return 1;
         }
