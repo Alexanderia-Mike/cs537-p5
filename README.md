@@ -22,4 +22,4 @@ Then all the deleted and undeleted jpg images stored inside the file `[DISK_IMAG
 ### Limitations:
 
 1. the size of the images should be no larger than 64.26 MB.
-2. 
+2. a directory should not use more than 1 data block
