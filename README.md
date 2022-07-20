@@ -18,3 +18,8 @@ The detailed project requirements are specified in the file [Project_5_File_syst
 3. type `./runScan [DISK_IMAGE_FILE] [OUT_DIR]`
 
 Then all the deleted and undeleted jpg images stored inside the file `[DISK_IMAGE_FILE]` will be put into the directory `[OUT_DIR]`.
+
+### Limitations:
+
+1. the size of the images should be no larger than 64.26 MB.
+2. 
