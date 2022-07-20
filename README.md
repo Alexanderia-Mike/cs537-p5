@@ -15,4 +15,6 @@ The detailed project requirements are specified in the file [Project_5_File_syst
 
 2. type `make` to compile
 
-3. type `./runScan [DISK_IMAGE_FILE]`
+3. type `./runScan [DISK_IMAGE_FILE] [OUT_DIR]`
+
+Then all the deleted and undeleted jpg images stored inside the file `[DISK_IMAGE_FILE]` will be put into the directory `[OUT_DIR]`.
